@@ -4,12 +4,124 @@
  */
 
 document.addEventListener('DOMContentLoaded', () => {
+  initAnalyticsTracking();
   initMobileMenu();
   initAccordion();
   initAdacInfoToggle();
   initImageFallback();
   initHeaderScrollEffect();
 });
+
+/**
+ * GA4 section and CTA measurement.
+ * Uses the page's existing Google tag and does not affect CTA navigation.
+ */
+function initAnalyticsTracking() {
+  const trackingKey = '__joieLandingAnalyticsTracking';
+
+  if (window[trackingKey]?.initialized) return;
+
+  const trackingState = {
+    initialized: true,
+    sentSections: new Set(),
+    observer: null
+  };
+  window[trackingKey] = trackingState;
+
+  const sectionTargets = [
+    { id: 'hero-title', sectionName: 'hero' },
+    { id: 'detail-space-title', sectionName: 'detail' },
+    { id: 'purchase-title', sectionName: 'cta' }
+  ].map(({ id, sectionName }) => ({ element: document.getElementById(id), sectionName }))
+    .filter(({ element }) => element);
+
+  function sendEvent(eventName, parameters) {
+    if (typeof window.gtag === 'function') {
+      window.gtag('event', eventName, parameters);
+    }
+  }
+
+  function recordSectionView(target) {
+    if (trackingState.sentSections.has(target.sectionName)) return;
+
+    trackingState.sentSections.add(target.sectionName);
+    sendEvent('section_view', { section_name: target.sectionName });
+
+    if (trackingState.observer) {
+      trackingState.observer.unobserve(target.element);
+    }
+  }
+
+  function getHeaderHeight() {
+    const header = document.getElementById('site-header');
+    return header ? Math.ceil(header.getBoundingClientRect().height) : 0;
+  }
+
+  function isAtLeastHalfVisible(element) {
+    const rect = element.getBoundingClientRect();
+    const visibleTop = Math.max(rect.top, getHeaderHeight());
+    const visibleBottom = Math.min(rect.bottom, window.innerHeight);
+    const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+
+    return rect.height > 0 && visibleHeight / rect.height >= 0.5;
+  }
+
+  function checkVisibleSectionTitles() {
+    if (document.visibilityState !== 'visible') return;
+
+    sectionTargets.forEach((target) => {
+      if (!trackingState.sentSections.has(target.sectionName) && isAtLeastHalfVisible(target.element)) {
+        recordSectionView(target);
+      }
+    });
+  }
+
+  function observeSectionTitles() {
+    if (!('IntersectionObserver' in window)) {
+      checkVisibleSectionTitles();
+      return;
+    }
+
+    const headerHeight = getHeaderHeight();
+    trackingState.observer = new IntersectionObserver((entries) => {
+      if (document.visibilityState !== 'visible') return;
+
+      entries.forEach((entry) => {
+        const target = sectionTargets.find(({ element }) => element === entry.target);
+        if (target && entry.isIntersecting && entry.intersectionRatio >= 0.5) {
+          recordSectionView(target);
+        }
+      });
+    }, {
+      root: null,
+      rootMargin: `-${headerHeight}px 0px 0px 0px`,
+      threshold: [0.5]
+    });
+
+    sectionTargets.forEach(({ element }) => trackingState.observer.observe(element));
+    checkVisibleSectionTitles();
+  }
+
+  const ctaButtons = [...new Set([
+    ...document.querySelectorAll('#cta-hero, [data-cta-location="hero"]'),
+    ...document.querySelectorAll('#cta-final, [data-cta-location="final"]')
+  ])];
+
+  ctaButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      const buttonLocation = button.dataset.ctaLocation || (button.id === 'cta-hero' ? 'hero' : 'final');
+      sendEvent('cta_click', { button_location: buttonLocation });
+    });
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      checkVisibleSectionTitles();
+    }
+  });
+
+  observeSectionTitles();
+}
 
 /**
  * 1. Mobile Menu Navigation
